@@ -61,6 +61,11 @@ import org.apache.zookeeper.server.quorum.QuorumPeerConfig.ConfigException;
  *
  */
 public class QuorumPeerMain {
+
+    // 私有的，静态，不可变的
+    // Logger代表了一个日志记录组件的意思，一般来说，会用大写的LOG或者是LOGGER，作为常量名字
+    // LoggerFactory，日志记录组件的工厂，工厂模式，去获取一个日志组件
+    // 根据你的类，把你自己的类名传递进去，根据你的类名获取一个日志组件，是这个意思
     private static final Logger LOG = LoggerFactory.getLogger(QuorumPeerMain.class);
 
     private static final String USAGE = "Usage: QuorumPeerMain configfile";
@@ -84,7 +89,7 @@ public class QuorumPeerMain {
         } catch (ConfigException e) {
             LOG.error("Invalid config, exiting abnormally", e);
             System.err.println("Invalid config, exiting abnormally");
-            System.exit(2);
+            System.exit(2); // 如果解析配置文件都有问题，直接是会退出的
         } catch (Exception e) {
             LOG.error("Unexpected exception, exiting abnormally", e);
             System.exit(1);
@@ -96,23 +101,33 @@ public class QuorumPeerMain {
     protected void initializeAndRun(String[] args)
         throws ConfigException, IOException
     {
+        // 创建了一个用于解析配置文件的类
         QuorumPeerConfig config = new QuorumPeerConfig();
-        if (args.length == 1) {
+        if (args.length == 1) { // 如果发现你的命令行里仅仅给他传递了一个参数的话
+            // 此时就认为你传递的就是那个配置文件，zoo.cfg
+            // 就用QuorumPeerConfig类去解析zoo.cfg配置文件
             config.parse(args[0]);
         }
 
         // Start and schedule the the purge task
+        // 就是启动了后台线程，定期清理zk的日志文件和快照文件
         DatadirCleanupManager purgeMgr = new DatadirCleanupManager(config
                 .getDataDir(), config.getDataLogDir(), config
                 .getSnapRetainCount(), config.getPurgeInterval());
         purgeMgr.start();
 
+        // 如果说发现你传递进来了一个zoo.cfg配置文件
+        // 另外这个配置文件servers配置了，就说明你配置了一个zk集群
         if (args.length == 1 && config.servers.size() > 0) {
+            // 走这个代码分支，按照集群的模式来启动当前的这个zk节点
             runFromConfig(config);
-        } else {
+        }
+        // 如果不是上面的情况，说明你是用单机模式启动的zk
+        else {
             LOG.warn("Either no config or no quorum defined in config, running "
                     + " in standalone mode");
             // there is only server in the quorum -- run as standalone
+            // 走这个分支是用来启动单机版本的zk的
             ZooKeeperServerMain.main(args);
         }
     }
@@ -126,16 +141,21 @@ public class QuorumPeerMain {
   
       LOG.info("Starting quorum peer");
       try {
+          // 这个东西其实是很关键的一个组件
+          // 他是会启动一个server，监听一个端口，2888
+          // 让客户端跟他建立连接，发送请求
           ServerCnxnFactory cnxnFactory = ServerCnxnFactory.createFactory();
           cnxnFactory.configure(config.getClientPortAddress(),
                                 config.getMaxClientCnxns());
-  
+
+          // 一个ZooKeeper节点的启动，最核心的东西就是这个QuorumPeer
+          // 这个QuorumPeer代表了一个zk节点
           quorumPeer = new QuorumPeer();
           quorumPeer.setClientPortAddress(config.getClientPortAddress());
           quorumPeer.setTxnFactory(new FileTxnSnapLog(
                       new File(config.getDataLogDir()),
                       new File(config.getDataDir())));
-          quorumPeer.setQuorumPeers(config.getServers());
+          quorumPeer.setQuorumPeers(config.getServers()); // quorumPeers，集群里的机器的数量
           quorumPeer.setElectionType(config.getElectionAlg());
           quorumPeer.setMyid(config.getServerId());
           quorumPeer.setTickTime(config.getTickTime());

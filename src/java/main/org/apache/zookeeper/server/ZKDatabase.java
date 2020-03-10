@@ -64,7 +64,7 @@ public class ZKDatabase {
      * make sure on a clear you take care of 
      * all these members.
      */
-    protected DataTree dataTree;
+    protected DataTree dataTree; // dfs，他是一个文件目录树的一个内存数据结构
     protected ConcurrentHashMap<Long, Integer> sessionsWithTimeouts;
     protected FileTxnSnapLog snapLog;
     protected long minCommittedLog, maxCommittedLog;

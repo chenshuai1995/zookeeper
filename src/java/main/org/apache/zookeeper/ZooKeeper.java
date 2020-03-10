@@ -85,6 +85,17 @@ import java.util.*;
  */
 public class ZooKeeper {
 
+    // 如果你在客户端里，不论是你自己，还是curator框架
+    // 如果要跟zk服务端建立连接的话
+    // 都是会直接创建一个ZooKeeper对象实例，就代表了一个zk客户端
+    // 他底层负责跟zk服务端建立长连接，维持一个session会话
+
+    // 包括后续都是通过ZooKeeper这个东西去对zk服务端发起对应的请求
+    // 以及接收响应
+    // 或者是向zk服务端注册watcher监听器，接收人家给你的回调通知
+
+    // 你只要构建出来ZooKeeper这个实力对象，就会建立一个长连接以及session会话
+
     public static final String ZOOKEEPER_CLIENT_CNXN_SOCKET = "zookeeper.clientCnxnSocket";
 
     protected final ClientCnxn cnxn;
@@ -128,6 +139,8 @@ public class ZooKeeper {
      * API.
      */
     private static class ZKWatchManager implements ClientWatchManager {
+        // path -> watcher集合
+        // 对每一个路径，都会有一系列的监听器
         private final Map<String, Set<Watcher>> dataWatches =
             new HashMap<String, Set<Watcher>>();
         private final Map<String, Set<Watcher>> existWatches =
@@ -233,7 +246,7 @@ public class ZooKeeper {
      * Register a watcher for a particular path.
      */
     abstract class WatchRegistration {
-        private Watcher watcher;
+        private Watcher watcher; // 一个回调函数
         private String clientPath;
         public WatchRegistration(Watcher watcher, String clientPath)
         {
@@ -248,7 +261,7 @@ public class ZooKeeper {
          * @param rc the result code of the operation that attempted to
          * add the watch on the path.
          */
-        public void register(int rc) {
+        public void register(int rc) { // 对于每个这个WatchRegistration，都可以进行注册
             if (shouldAddWatch(rc)) {
                 Map<String, Set<Watcher>> watches = getWatches(rc);
                 synchronized(watches) {
@@ -377,6 +390,10 @@ public class ZooKeeper {
     public ZooKeeper(String connectString, int sessionTimeout, Watcher watcher)
         throws IOException
     {
+        // 这个版本的构造函数一般来说用的是最多的
+        // connectString里会传递进来所有zk服务器的地址，192.168.31.109:2181,192.168.31.110:2181
+        // sessionTimeout，一旦你建立了一个长连接，就会建立一个session
+        // 但是如果你跟zk服务端超过一定时间不通信，会话就会过期
         this(connectString, sessionTimeout, watcher, false);
     }
 
@@ -438,14 +455,38 @@ public class ZooKeeper {
         LOG.info("Initiating client connection, connectString=" + connectString
                 + " sessionTimeout=" + sessionTimeout + " watcher=" + watcher);
 
-        watchManager.defaultWatcher = watcher;
+        watchManager.defaultWatcher = watcher; // 也就是说zk的一些事件，通知你的时候
+        // 此时就回调你的默认监听器就可以了
+
+        // 就是解析你的zk机器列表
+        // 封装成一个HostProvider组件，就是每次你连接一个zk服务器
+        // 随机的提供一个机器地址给你
+
+        // 你的zk集群有3台机器，1个leader，2个follower
+        // 比如你有1万个客户端要连接，此时可能3000个客户端连接leader，3000个客户端连接follower
+        // 还有3000个客户端连接最后一个follower
+
+        // 如果你是要写入数据，follower会把请求转发给leader的
+        // 为了保证顺序一致性，为了保证顺序，必须是让所有的请求都是在leader上执行的
+        // leader可以保证所有的请求都是有序的
 
         ConnectStringParser connectStringParser = new ConnectStringParser(
                 connectString);
         HostProvider hostProvider = new StaticHostProvider(
                 connectStringParser.getServerAddresses());
+
+        // ClientCnxn，核心的组件
+        // 这个组件的主要的任务就是跟zk服务端进行通信
         cnxn = new ClientCnxn(connectStringParser.getChrootPath(),
-                hostProvider, sessionTimeout, this, watchManager,
+                // 192.168.31.109:2181.../data/crm
+                // 后续所有的znode操作，都是在你指定的chroot路径下执行的
+                // set /fileId 1
+                // set /data/crm/fileId 1
+
+                // 这个东西是可以让你的不同的系统使用zk的时候都限定一个自己系统的chroot路径
+                // 大家避免出现重复和冲突的路径名字
+
+                hostProvider, sessionTimeout, this, watchManager, // 管理watcher监听器
                 getClientCnxnSocket(), canBeReadOnly);
         cnxn.start();
     }
@@ -1129,6 +1170,9 @@ public class ZooKeeper {
     public byte[] getData(final String path, Watcher watcher, Stat stat)
         throws KeeperException, InterruptedException
      {
+         // 对于原生的API里的getData而言
+         // 你可以去获取一个路径的数据，在获取这个路径的同时，可以对这个路径加一个监听器
+         // DataWatcher，就可以对这个znode的数据变化进行监听
         final String clientPath = path;
         PathUtils.validatePath(clientPath);
 
@@ -1144,7 +1188,8 @@ public class ZooKeeper {
         h.setType(ZooDefs.OpCode.getData);
         GetDataRequest request = new GetDataRequest();
         request.setPath(serverPath);
-        request.setWatch(watcher != null);
+        request.setWatch(watcher != null); // 他会把你的watcher放入请求中
+
         GetDataResponse response = new GetDataResponse();
         ReplyHeader r = cnxn.submitRequest(h, request, response, wcb);
         if (r.getErr() != 0) {
@@ -1770,6 +1815,8 @@ public class ZooKeeper {
                 .getProperty(ZOOKEEPER_CLIENT_CNXN_SOCKET);
         if (clientCnxnSocketName == null) {
             clientCnxnSocketName = ClientCnxnSocketNIO.class.getName();
+            // 默认是基于NIO进行网络通信
+            // 这个组件是封装了CilentCnxnSocket是基于NIO跟服务端进行通信的
         }
         try {
             return (ClientCnxnSocket) Class.forName(clientCnxnSocketName)

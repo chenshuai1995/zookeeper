@@ -55,18 +55,37 @@ public class LeaderZooKeeperServer extends QuorumZooKeeperServer {
     public Leader getLeader(){
         return self.leader;
     }
-    
+
+    /**
+     *
+     * Just like the standard ZooKeeperServer. We just replace the request
+     * processors: PrepRequestProcessor -> ProposalRequestProcessor ->
+     * CommitProcessor -> Leader.ToBeAppliedRequestProcessor ->
+     * FinalRequestProcessor
+     */
     @Override
     protected void setupRequestProcessors() {
+        // 后续有一些善后的工作需要进行处理
         RequestProcessor finalProcessor = new FinalRequestProcessor(this);
         RequestProcessor toBeAppliedProcessor = new Leader.ToBeAppliedRequestProcessor(
                 finalProcessor, getLeader().toBeApplied);
+
+        // 他首先可以把请求commit应用到自己内存数据库里去
+        // 接着可以发送commit请求给所有的follower，让follower也commit到自己的内存数据库里去
+        // 只要进入内存数据库，其他人就可以看到了
         commitProcessor = new CommitProcessor(toBeAppliedProcessor,
-                Long.toString(getServerId()), false);
+        Long.toString(getServerId()), false);
         commitProcessor.start();
+
+        // 必然是把请求从outstandingQueue里获取出来
+        // 然后呢，他就是负责，进行2PC的同步，第一步，先将proposal写入本地事务日志里去
+        // 第二步，他先把proposal发送给所有的follower，所有的follower也得写入自己的本地事务日志里去
+        // 第三步，然后，其实应该是等待过半的follower对这个请求返回ack
         ProposalRequestProcessor proposalProcessor = new ProposalRequestProcessor(this,
                 commitProcessor);
         proposalProcessor.initialize();
+
+        // 对请求进行封装，放入一个队列中去
         firstProcessor = new PrepRequestProcessor(this, proposalProcessor);
         ((PrepRequestProcessor)firstProcessor).start();
     }

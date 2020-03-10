@@ -100,6 +100,11 @@ public abstract class ServerCnxnFactory {
             System.getProperty(ZOOKEEPER_SERVER_CNXN_FACTORY);
         if (serverCnxnFactoryName == null) {
             serverCnxnFactoryName = NIOServerCnxnFactory.class.getName();
+            // 其实他的一个思路
+            // 在zk服务器之间进行网络通信走的是最简单的BIO架构
+            // 但是如果要面临海量的客户端跟他建立长连接，各个客户端跟zk服务器之间都是建立长连接
+            // 那么肯定BIO是不行的，一个连接一个线程，没法支撑单机几万几十万的长连接
+            // 此时必须用基于NIO或者Netty来开发server，支撑大量长连接
         }
         try {
             return (ServerCnxnFactory) Class.forName(serverCnxnFactoryName)

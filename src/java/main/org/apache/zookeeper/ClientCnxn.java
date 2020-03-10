@@ -288,6 +288,11 @@ public class ClientCnxn {
                 } else if (request != null) {
                     request.serialize(boa, "request");
                 }
+
+                // 在进行请求序列化的时候，都会带上一个boolean值
+                // watch=true，此时就会告诉zk服务端，这个客户端需要对这个znode监听
+                // 他的数据的一个变化
+
                 baos.close();
                 this.bb = ByteBuffer.wrap(baos.toByteArray());
                 this.bb.putInt(this.bb.capacity() - 4);
@@ -375,12 +380,16 @@ public class ClientCnxn {
         this.hostProvider = hostProvider;
         this.chrootPath = chrootPath;
 
-        connectTimeout = sessionTimeout / hostProvider.size();
-        readTimeout = sessionTimeout * 2 / 3;
+        connectTimeout = sessionTimeout / hostProvider.size(); // 跟zk服务端连接超时的时间
+        readTimeout = sessionTimeout * 2 / 3; // 读取数据超时时间
+
+        // 60s * 2 / 3 = 40s
+
         readOnly = canBeReadOnly;
 
-        sendThread = new SendThread(clientCnxnSocket);
-        eventThread = new EventThread();
+        sendThread = new SendThread(clientCnxnSocket); // 这个线程是负责基于底层的socket
+        // 跟zk服务端进行通信，发送数据过去的
+        eventThread = new EventThread(); // 这个线程是专门接收zk服务端反向通知过来的event事件
 
     }
 
@@ -488,7 +497,8 @@ public class ClientCnxn {
            try {
               isRunning = true;
               while (true) {
-                 Object event = waitingEvents.take();
+                 Object event = waitingEvents.take(); // 主要就是去接收
+                  // zk 服务端反向推送过来的event事件，然后负责回调监听事件的watcher
                  if (event == eventOfDeath) {
                     wasKilled = true;
                  } else {
@@ -514,8 +524,8 @@ public class ClientCnxn {
               if (event instanceof WatcherSetEventPair) {
                   // each watcher will process the event
                   WatcherSetEventPair pair = (WatcherSetEventPair) event;
-                  for (Watcher watcher : pair.watchers) {
-                      try {
+                  for (Watcher watcher : pair.watchers) { // 触发事件的路径，获取到
+                      try { // 客户端注册的一系列的watcher
                           watcher.process(pair.event);
                       } catch (Throwable t) {
                           LOG.error("Error while calling watcher ", t);
@@ -612,6 +622,9 @@ public class ClientCnxn {
        }
     }
 
+    // 很清晰，getData、getChildren、exists请求先发送出去
+    // 直到这些请求成功完成了，返回了响应，此时调用了finishPacket方法
+    // 在这里，才会进行监听器的注册
     private void finishPacket(Packet p) {
         if (p.watchRegistration != null) {
             p.watchRegistration.register(p.replyHeader.getErr());
@@ -738,6 +751,8 @@ public class ClientCnxn {
                     LOG.debug("Got notification sessionid:0x"
                         + Long.toHexString(sessionId));
                 }
+
+                // 在这里会收到事件通知，反序列化
                 WatcherEvent event = new WatcherEvent();
                 event.deserialize(bbia, "response");
 
@@ -853,15 +868,19 @@ public class ClientCnxn {
             long sessId = (seenRwServerBefore) ? sessionId : 0;
             ConnectRequest conReq = new ConnectRequest(0, lastZxid,
                     sessionTimeout, sessId, sessionPasswd);
+
+            // 底层的物理网络连接建立之后
+            // 关键的是在上层的zk层面去建立一个会话session出来
+
             synchronized (outgoingQueue) {
                 // We add backwards since we are pushing into the front
                 // Only send if there's a pending watch
                 // TODO: here we have the only remaining use of zooKeeper in
                 // this class. It's to be eliminated!
                 if (!disableAutoWatchReset) {
-                    List<String> dataWatches = zooKeeper.getDataWatches();
-                    List<String> existWatches = zooKeeper.getExistWatches();
-                    List<String> childWatches = zooKeeper.getChildWatches();
+                    List<String> dataWatches = zooKeeper.getDataWatches(); // 监听一个znode数据的变化
+                    List<String> existWatches = zooKeeper.getExistWatches(); // 监听一znode是否存在
+                    List<String> childWatches = zooKeeper.getChildWatches(); // 监听一个znode下的子节点 的变化
                     if (!dataWatches.isEmpty()
                                 || !existWatches.isEmpty() || !childWatches.isEmpty()) {
                         SetWatches sw = new SetWatches(lastZxid,
@@ -872,7 +891,7 @@ public class ClientCnxn {
                         h.setType(ZooDefs.OpCode.setWatches);
                         h.setXid(-8);
                         Packet packet = new Packet(h, new ReplyHeader(), sw, null, null);
-                        outgoingQueue.addFirst(packet);
+                        outgoingQueue.addFirst(packet); // 封装了一个Packet，里面放了一堆你要施加的监听器
                     }
                 }
 
@@ -881,6 +900,8 @@ public class ClientCnxn {
                             OpCode.auth), null, new AuthPacket(0, id.scheme,
                             id.data), null, null));
                 }
+
+                // 封装一个ConnectRequest，放入待发送队列里去
                 outgoingQueue.addFirst(new Packet(null, null, conReq,
                             null, null, readOnly));
             }
@@ -934,7 +955,11 @@ public class ClientCnxn {
                 addr = rwServerAddress;
                 rwServerAddress = null;
             } else {
-                addr = hostProvider.next(1000);
+                addr = hostProvider.next(1000); // 这里的话是
+                // hostProvider其实是把打乱的机器列表给做成一个环形
+                // 在这个环形里面，每次都会尝试从第一个开始，选择一台机器出来
+                // 每个客户端优先尝试的zk服务器都是随机的一台
+                // zk03、zk01、zk02
             }
 
             setName(getName().replaceAll("\\(.*\\)",
@@ -979,6 +1004,8 @@ public class ClientCnxn {
             while (state.isAlive()) {
                 try {
                     if (!clientCnxnSocket.isConnected()) {
+                        // 当前不是第一次进行连接了
+                        // 此时很可能是人家zk的服务器挂了，此时重新进行连接
                         if(!isFirstConnect){
                             try {
                                 Thread.sleep(r.nextInt(1000));
@@ -990,6 +1017,7 @@ public class ClientCnxn {
                         if (closing || !state.isAlive()) {
                             break;
                         }
+                        // 在这里，由SendThread负责去跟zk服务端建立一个长连接出来
                         startConnect();
                         clientCnxnSocket.updateLastSendAndHeard();
                     }
@@ -1041,8 +1069,12 @@ public class ClientCnxn {
                     if (state.isConnected()) {
                         int timeToNextPing = readTimeout / 2
                                 - clientCnxnSocket.getIdleSend();
+
+                        // 已经有多长时间没有发送消息到服务端去了
+                        // 比如说20s - 5s = 15s
+
                         if (timeToNextPing <= 0) {
-                            sendPing();
+                            sendPing(); // 客户端而言一定会每隔一点时间去发送一个ping
                             clientCnxnSocket.updateLastSend();
                         } else {
                             if (timeToNextPing < to) {
@@ -1065,6 +1097,8 @@ public class ClientCnxn {
                         to = Math.min(to, pingRwTimeout - idlePingRwServer);
                     }
 
+                    // 最核心的一点是在这里
+                    // 基于他底层封装的ClientCnxnSocket把outgoingQueue里的数据发送出去
                     clientCnxnSocket.doTransport(to, pendingQueue, outgoingQueue, ClientCnxn.this);
                 } catch (Throwable e) {
                     if (closing) {
@@ -1094,14 +1128,22 @@ public class ClientCnxn {
                                             + ", unexpected error"
                                             + RETRY_CONN_MSG, e);
                         }
+
+                        // 关闭连接、完成失败的请求
                         cleanup();
+
                         if (state.isAlive()) {
+                            // 在这里会发布一个事件，Disconnected
+                            // 如果你最早在创建ZooKeeper的时候加了一个默认的监听器
                             eventThread.queueEvent(new WatchedEvent(
                                     Event.EventType.None,
                                     Event.KeeperState.Disconnected,
                                     null));
                         }
+
+                        // 重新更新他底层网络连接初始化的一个时间
                         clientCnxnSocket.updateNow();
+                        // 重新初始化底层网络连接里的最近一次发送请求和接收响应的时间
                         clientCnxnSocket.updateLastSendAndHeard();
                     }
                 }
@@ -1118,6 +1160,11 @@ public class ClientCnxn {
 
         private void pingRwServer() throws RWServerFoundException {
             String result = null;
+
+            // 传入的几台机器，都做成随机的打乱
+            // 每次走这个next，都是指针指向下一个机器，zk02、zk03、zk01
+            //
+
             InetSocketAddress addr = hostProvider.next(0);
             LOG.info("Checking server " + addr + " for being r/w." +
                     " Timeout " + pingRwTimeout);
@@ -1154,13 +1201,18 @@ public class ClientCnxn {
         }
 
         private void cleanup() {
+            // 第一步，客户端主动断开跟服务器之间的一切连接
             clientCnxnSocket.cleanup();
+
+            // 第二步，对所有已经发送出去，但是正在等待响应的请求，都进行完成，标识其失败了
             synchronized (pendingQueue) {
                 for (Packet p : pendingQueue) {
                     conLossPacket(p);
                 }
                 pendingQueue.clear();
             }
+
+            // 第三步，对于还没发送出去的请求，同样进行完成，标志其失败了
             synchronized (outgoingQueue) {
                 for (Packet p : outgoingQueue) {
                     conLossPacket(p);
@@ -1199,7 +1251,7 @@ public class ClientCnxn {
             readTimeout = negotiatedSessionTimeout * 2 / 3;
             connectTimeout = negotiatedSessionTimeout / hostProvider.size();
             hostProvider.onConnected();
-            sessionId = _sessionId;
+            sessionId = _sessionId; // 人家给你生成的这个sessionId
             sessionPasswd = _sessionPasswd;
             state = (isRO) ?
                     States.CONNECTEDREADONLY : States.CONNECTED;
@@ -1214,6 +1266,12 @@ public class ClientCnxn {
             eventThread.queueEvent(new WatchedEvent(
                     Watcher.Event.EventType.None,
                     eventState, null));
+
+            // 平时如果我们自己基于zk的客户端来玩儿，如果你一开始构建ZooKeeper的时候传递进去一个Watcher监听
+            // 连接一旦建立完毕，底层TCP连接建立，发送ConnectRequest过去，收到一个ConnectResponse
+            // 会话初始化完毕
+            // 此时人家会通过一个WatchedEvent来回调你的watcher通知你
+
         }
 
         void close() {
@@ -1305,6 +1363,7 @@ public class ClientCnxn {
         Packet packet = queuePacket(h, r, request, response, null, null, null,
                     null, watchRegistration);
         synchronized (packet) {
+            // 直到你的请求发送完毕，同时接收到响应之后，这里才会退出
             while (!packet.finished) {
                 packet.wait();
             }
@@ -1359,7 +1418,7 @@ public class ClientCnxn {
                 outgoingQueue.add(packet);
             }
         }
-        sendThread.getClientCnxnSocket().wakeupCnxn();
+        sendThread.getClientCnxnSocket().wakeupCnxn(); // 唤醒底层的网络通信组件
         return packet;
     }
 

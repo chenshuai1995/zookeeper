@@ -181,6 +181,9 @@ public class Leader {
         try {
             ss = new ServerSocket();
             ss.setReuseAddress(true);
+            // servers = 192.168.31.109:2888:3888
+            // 2888：其实就是leader和follower互相之间进行通信的端口
+            // 3888：其实专门是用来进行leader选举的通信端口
             ss.bind(new InetSocketAddress(self.getQuorumAddress().getPort()));
         } catch (BindException e) {
             LOG.error("Couldn't bind to port "
@@ -297,12 +300,15 @@ public class Leader {
             try {
                 while (!stop) {
                     try{
-                        Socket s = ss.accept();
+                        Socket s = ss.accept(); // 阻塞住
                         // start with the initLimit, once the ack is processed
                         // in LearnerHandler switch to the syncLimit
                         s.setSoTimeout(self.tickTime * self.initLimit);
                         s.setTcpNoDelay(nodelay);
                         LearnerHandler fh = new LearnerHandler(s, Leader.this);
+                        // 对于Leader而言，走的真的是传统的BIO网络通信
+                        // 对于每个连接都创建一个独立的线程去服务于那个连接的网络通信
+                        // NIO，少量线程服务于大量的网络连接
                         fh.start();
                     } catch (SocketException e) {
                         if (stop) {
@@ -358,6 +364,8 @@ public class Leader {
             // Start thread that waits for connection requests from 
             // new followers.
             cnxAcceptor = new LearnerCnxAcceptor();
+            // leader：leader
+            // learner：follower
             cnxAcceptor.start();
             
             readyToStart = true;
@@ -564,11 +572,16 @@ public class Leader {
             return;
         }
         
-        p.ackSet.add(sid);
+        p.ackSet.add(sid); // 每个proposal都对应一个ack集合
+
         if (LOG.isDebugEnabled()) {
             LOG.debug("Count for zxid: 0x{} is {}",
                     Long.toHexString(zxid), p.ackSet.size());
         }
+
+        // 判断一下，是否超过半数的follower返回了ack了
+        // 3 / 2 = 1，1就是half，follower的一半
+        //
         if (self.getQuorumVerifier().containsQuorum(p.ackSet)){             
             if (zxid != lastCommitted+1) {
                 LOG.warn("Commiting zxid 0x{} from {} not first!",
@@ -665,7 +678,7 @@ public class Leader {
      */
     void sendPacket(QuorumPacket qp) {
         synchronized (forwardingFollowers) {
-            for (LearnerHandler f : forwardingFollowers) {                
+            for (LearnerHandler f : forwardingFollowers) { // 遍历所有的follower的LearnerHandler
                 f.queuePacket(qp);
             }
         }

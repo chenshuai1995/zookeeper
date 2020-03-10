@@ -407,8 +407,9 @@ public class QuorumPeer extends Thread implements QuorumStats.Provider {
     @Override
     public synchronized void start() {
         loadDataBase();
-        cnxnFactory.start();        
-        startLeaderElection();
+        cnxnFactory.start(); // 执行NIOServerCnxnFactory
+        startLeaderElection(); // 启动一个leader选举
+        // initLeaderElection()，为leader选举做好初始化的工作
         super.start();
     }
 
@@ -463,6 +464,7 @@ public class QuorumPeer extends Thread implements QuorumStats.Provider {
     }
     synchronized public void startLeaderElection() {
     	try {
+    	    // 先投自己一票
     		currentVote = new Vote(myid, getLastLoggedZxid(), getCurrentEpoch());
     	} catch(IOException e) {
     		RuntimeException re = new RuntimeException(e.getMessage());
@@ -478,6 +480,8 @@ public class QuorumPeer extends Thread implements QuorumStats.Provider {
         if (myQuorumAddr == null) {
             throw new RuntimeException("My id " + myid + " not in the peer list");
         }
+        // zk本身是提供几种选举算法，0，1，2
+        // 0这种算法是基于UDP网络连接，不可靠的网络连接
         if (electionType == 0) {
             try {
                 udpSocket = new DatagramSocket(myQuorumAddr.getPort());
@@ -487,6 +491,7 @@ public class QuorumPeer extends Thread implements QuorumStats.Provider {
                 throw new RuntimeException(e);
             }
         }
+        // 创建选举算法
         this.electionAlg = createElectionAlgorithm(electionType);
     }
     
@@ -571,6 +576,8 @@ public class QuorumPeer extends Thread implements QuorumStats.Provider {
         Election le=null;
                 
         //TODO: use a factory rather than a switch
+        // 目前来说0，1，2都已经被废弃掉了
+        // 仅仅支持的是3，走的是FastLeaderElection，只有这一种算法
         switch (electionAlgorithm) {
         case 0:
             le = new LeaderElection(this);
@@ -582,10 +589,12 @@ public class QuorumPeer extends Thread implements QuorumStats.Provider {
             le = new AuthFastLeaderElection(this, true);
             break;
         case 3:
+            // 这个是用于zk节点之间的网络通信的组件
             qcm = new QuorumCnxManager(this);
             QuorumCnxManager.Listener listener = qcm.listener;
             if(listener != null){
-                listener.start();
+                listener.start(); // 启动一个listener，用于监听其他机器发送过来的请求
+                // 通过这个组件也可以给其他机器发送请求
                 le = new FastLeaderElection(this, qcm);
             } else {
                 LOG.error("Null listener when initializing cnx manager");
@@ -628,12 +637,14 @@ public class QuorumPeer extends Thread implements QuorumStats.Provider {
     }
 
     @Override
-    public void run() {
+    public void run() { // QuorumPeer这个东西，其实的话呢，他就是涵盖掉了zk核心的业务逻辑
         setName("QuorumPeer" + "[myid=" + getId() + "]" +
                 cnxnFactory.getLocalAddress());
 
         LOG.debug("Starting quorum peer");
         try {
+            // 这一大坨东西都是在用jmx的技术注册一些bean
+            // 后续你可以通过jmx端口去观察zookeeper内部的一些运行状况
             jmxQuorumBean = new QuorumBean(this);
             MBeanRegistry.getInstance().register(jmxQuorumBean, null);
             for(QuorumServer s: getView().values()){
@@ -664,8 +675,12 @@ public class QuorumPeer extends Thread implements QuorumStats.Provider {
             /*
              * Main loop
              */
+            // QuorumPeer的核心逻辑
             while (running) {
-                switch (getPeerState()) {
+                switch (getPeerState()) { // 如果说当前你是刚刚才启动的话
+                    // 你的状态都是LOOKING，在寻找leader的过程中
+                    // 如果说没有leader，此时你就要发起投票给其他所有人尝试去选举leader
+                    // 如果已经有了一个leader了，此时你就让自己作为follower
                 case LOOKING:
                     LOG.info("LOOKING");
 

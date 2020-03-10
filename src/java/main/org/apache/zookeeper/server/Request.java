@@ -65,7 +65,7 @@ public class Request {
 
     public final ByteBuffer request;
 
-    public final ServerCnxn cnxn;
+    public final ServerCnxn cnxn; // 对于zk服务端而言，跟每个客户端的连接，都是一个NIOServerCnxn
 
     public TxnHeader hdr;
 

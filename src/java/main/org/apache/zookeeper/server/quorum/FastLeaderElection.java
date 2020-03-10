@@ -520,10 +520,11 @@ public class FastLeaderElection implements Election {
         for (QuorumServer server : self.getVotingView().values()) {
             long sid = server.id;
 
+            // 对其他每台机器都发送一个投票的请求
             ToSend notmsg = new ToSend(ToSend.mType.notification,
                     proposedLeader,
                     proposedZxid,
-                    logicalclock,
+                    logicalclock, // 投票的周期号
                     QuorumPeer.ServerState.LOOKING,
                     sid,
                     proposedEpoch);
@@ -739,7 +740,8 @@ public class FastLeaderElection implements Election {
 
             LOG.info("New election. My id =  " + self.getId() +
                     ", proposed zxid=0x" + Long.toHexString(proposedZxid));
-            sendNotifications();
+            sendNotifications(); // 这里面其实是属于发起了自己的投票给别人，通过QuorumCnxManager
+            // 这里是放入到一个sendQueue里去了
 
             /*
              * Loop in which we exchange notifications until we find a leader
@@ -752,7 +754,7 @@ public class FastLeaderElection implements Election {
                  * the termination time
                  */
                 Notification n = recvqueue.poll(notTimeout,
-                        TimeUnit.MILLISECONDS);
+                        TimeUnit.MILLISECONDS); // 尝试通过recvqueue去接收消息
 
                 /*
                  * Sends more notifications if haven't received enough.
@@ -803,7 +805,7 @@ public class FastLeaderElection implements Election {
                         } else if (totalOrderPredicate(n.leader, n.zxid, n.peerEpoch,
                                 proposedLeader, proposedZxid, proposedEpoch)) {
                             updateProposal(n.leader, n.zxid, n.peerEpoch);
-                            sendNotifications();
+                            sendNotifications(); // 再把你最新的选票给发送出去这样子
                         }
 
                         if(LOG.isDebugEnabled()){

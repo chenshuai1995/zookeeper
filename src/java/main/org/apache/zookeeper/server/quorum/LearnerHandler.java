@@ -147,6 +147,9 @@ public class LearnerHandler extends Thread {
                 if (LOG.isTraceEnabled()) {
                     ZooTrace.logQuorumPacket(LOG, traceMask, 'o', p);
                 }
+                // 在这个里面，oa就是jute的支持序列化的输出流
+                // os底层封装的输出流，实际上来说就是Socket的输出流，跟follower之间的连接
+                // 如果说此时有一个follower崩溃了，对于leader而言，是在这里可以感知到的
                 oa.writeRecord(p, "packet");
             } catch (IOException e) {
                 if (!sock.isClosed()) {
@@ -155,6 +158,7 @@ public class LearnerHandler extends Thread {
                         // this will cause everything to shutdown on
                         // this learner handler and will help notify
                         // the learner/observer instantaneously
+                        // 如果说遇到了IO异常之后，一定是很可能说这个机器就挂掉了
                         sock.close();
                     } catch(IOException ie) {
                         LOG.warn("Error closing socket for handler " + this, ie);
@@ -232,14 +236,33 @@ public class LearnerHandler extends Thread {
      */
     @Override
     public void run() {
-        try {            
+        try {
+            // 对leader而言也是使用的jute来进行序列化和反序列化
             ia = BinaryInputArchive.getArchive(new BufferedInputStream(sock
                     .getInputStream()));
             bufferedOutput = new BufferedOutputStream(sock.getOutputStream());
             oa = BinaryOutputArchive.getArchive(bufferedOutput);
 
+//            // leader发送一个对象到follower
+//            // 类的对象包含几个字段：name、age、score
+//
+//            String name = "leo";
+//            int age = 20;
+//            float score = 90.5f;
+//
+//            oa.writeString(name, "name");
+//            oa.writeInt(age, "age");
+//            oa.writeFloat(score, "score");
+//
+//            // 序列化，就是把一个对象里的各个字段，给写入到这个输出流里去
+//            // 人家给你把不同的字段类型都转换为字节数据
+//            // 通过字节流传输到follower那儿去
+
             QuorumPacket qp = new QuorumPacket();
-            ia.readRecord(qp, "packet");
+            ia.readRecord(qp, "packet"); // 在这里会等待读取出来人家的follower发送过来的注册数据包
+
+            // 在这里，他直接会尝试从jute输入流里读取数据
+
             if(qp.getType() != Leader.FOLLOWERINFO && qp.getType() != Leader.OBSERVERINFO){
             	LOG.error("First packet " + qp.toString()
                         + " is not FOLLOWERINFO or OBSERVERINFO!");
@@ -308,7 +331,9 @@ public class LearnerHandler extends Thread {
             
             /* we are sending the diff check if we have proposals in memory to be able to 
              * send a diff to the 
-             */ 
+             */
+            // 这段代码，我们现在不看
+            // 如果follower刚跟leader进行连接、注册之后，会进行数据同步
             ReentrantReadWriteLock lock = leader.zk.getZKDatabase().getLogLock();
             ReadLock rl = lock.readLock();
             try {
@@ -429,6 +454,8 @@ public class LearnerHandler extends Thread {
             bufferedOutput.flush();
             
             // Start sending packets
+            // 把数据同步完之后，其实在这里，就会单独再次启动一个线程
+            // 额外启动的一个线程，主要的工作，后续应该就是给follower不停的同步数据
             new Thread() {
                 public void run() {
                     Thread.currentThread().setName(
@@ -453,6 +480,8 @@ public class LearnerHandler extends Thread {
                 return;
             }
             leader.processAck(this.sid, qp.getZxid(), sock.getLocalSocketAddress());
+
+            // 如果数据同步完毕之后，会接收follower的一些ack这样子
             
             // now that the ack has been processed expect the syncLimit
             sock.setSoTimeout(leader.self.tickTime * leader.self.syncLimit);
@@ -471,9 +500,12 @@ public class LearnerHandler extends Thread {
             //
             queuedPackets.add(new QuorumPacket(Leader.UPTODATE, -1, null, null));
 
+            // leader -> 不停的给follower发送数据过去，2PC + 过半写机制
+            // 他是如何接收follower的ack的呢？
             while (true) {
                 qp = new QuorumPacket();
-                ia.readRecord(qp, "packet");
+                ia.readRecord(qp, "packet"); // 在这里从follower读取ack的时候
+                // 其实也是会有异常的
 
                 long traceMask = ZooTrace.SERVER_PACKET_TRACE_MASK;
                 if (qp.getType() == Leader.PING) {

@@ -266,7 +266,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
     }
 
     public void takeSnapshot(){
-        try {
+        try { // 内存里的文件目录树，直接序列化写一份到磁盘里去
             txnLogFactory.save(zkDb.getDataTree(), zkDb.getSessionWithTimeOuts());
         } catch (IOException e) {
             LOG.error("Severe unrecoverable error, exiting", e);
@@ -516,6 +516,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
     }
 
     long createSession(ServerCnxn cnxn, byte passwd[], int timeout) {
+        // 他是基于SessionTracker的一个组价创建了一个Session出来
         long sessionId = sessionTracker.createSession(timeout);
         Random r = new Random(sessionId ^ superSecret);
         r.nextBytes(passwd);
@@ -642,7 +643,12 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
             }
         }
         try {
-            touch(si.cnxn);
+            touch(si.cnxn); // 不管是ping，还是别的任何的请求，最后都会来执行submitRequest
+            // 但凡执行这个操作之后，其实他都会执行以下touch
+            // 这个touch一旦执行，都会更新服务端的session他的过期时间
+            // 12:05
+            // 12:04 + 120s = 12:06，进行处理expireTime，做成expirationInterval的倍数
+            // 重新进行分桶，可能此时就放到其他的桶里去了
             boolean validpacket = Request.isValid(si.type);
             if (validpacket) {
                 firstProcessor.processRequest(si);
@@ -775,6 +781,11 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
     
     public void processConnectRequest(ServerCnxn cnxn, ByteBuffer incomingBuffer) throws IOException {
         BinaryInputArchive bia = BinaryInputArchive.getArchive(new ByteBufferInputStream(incomingBuffer));
+        // ConnectRequest是作为字节数据，bytebuffer里的
+        // 针对bytebuffer定义一个inputstream
+        // 使用jute封装他
+
+        // 此时走的是一个jute反序列化的协议
         ConnectRequest connReq = new ConnectRequest();
         connReq.deserialize(bia, "connect");
         if (LOG.isDebugEnabled()) {
@@ -838,6 +849,9 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         } else {
             LOG.info("Client attempting to establish new session at "
                     + cnxn.getRemoteSocketAddress());
+            // sessionid一开始一定时空的
+            // session是由服务端开启的，客户端仅仅是发送connectRequest过去而已
+            // 构造了一个跟客户端之间的session出来
             createSession(cnxn, passwd, sessionTimeout);
         }
     }
@@ -859,7 +873,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         // pointing
         // to the start of the txn
         incomingBuffer = incomingBuffer.slice();
-        if (h.getType() == OpCode.auth) {
+        if (h.getType() == OpCode.auth) { // 是什么请求？
             LOG.info("got auth packet " + cnxn.getRemoteSocketAddress());
             AuthPacket authPacket = new AuthPacket();
             ByteBufferInputStream.byteBuffer2Record(incomingBuffer, authPacket);

@@ -42,6 +42,11 @@ import org.apache.zookeeper.server.quorum.flexible.QuorumHierarchical;
 import org.apache.zookeeper.server.quorum.flexible.QuorumMaj;
 import org.apache.zookeeper.server.quorum.flexible.QuorumVerifier;
 
+/**
+ * 对于这个类而言，他就是代表了zookeeper的配置
+ * 通过他把zoo.cfg里的所有配置信息，都加载到内存里来，放在这个类的对象中
+ * 后续在zk运行的过程中，所有对配置的操作，都交给这个类来进行处理
+ */
 public class QuorumPeerConfig {
     private static final Logger LOG = LoggerFactory.getLogger(QuorumPeerConfig.class);
 
@@ -96,9 +101,19 @@ public class QuorumPeerConfig {
      * @throws ConfigException error processing configuration
      */
     public void parse(String path) throws ConfigException {
+        // 基于配置文件的path路径，封装成了File对象
         File configFile = new File(path);
 
         LOG.info("Reading configuration from: " + configFile);
+
+        // 异常的体系大致分为两类
+        // 第一类异常：代码写好之后，在代码编译的时候，就可以提前预测到可能发生异常的地方
+        // 第二类异常：就是在写代码的时候并不确定一定会发生异常的，但是在运行的过程中可能会发生异常
+
+        // 所谓的异常处理的体系
+        // 第一点，其实就是在你的代码运行过程中，你必须去主动去发现各种可能出现异常的地方
+        // 第二点，对于所有可能有异常的地方，都必须进行一定的try catch处理
+        // 第三点，如何对异常进行处理呢：要不然是往外抛，自定义异常，要不然就是进行一定的重试、其他的处理、自动退出
 
         try {
             if (!configFile.exists()) {
@@ -131,6 +146,8 @@ public class QuorumPeerConfig {
     public void parseProperties(Properties zkProp)
     throws IOException, ConfigException {
         int clientPort = 0;
+
+        // 下面一大坨东西就是针对加载到内存里来的配置进行处理和类型转换
         String clientPortAddress = null;
         for (Entry<Object, Object> entry : zkProp.entrySet()) {
             String key = entry.getKey().toString().trim();
@@ -231,6 +248,8 @@ public class QuorumPeerConfig {
         // Reset to MIN_SNAP_RETAIN_COUNT if invalid (less than 3)
         // PurgeTxnLog.purge(File, File, int) will not allow to purge less
         // than 3.
+        // 需要对加载到内存里来的参数进行一定的校验
+        // 如果有问题的话，还需要抛出对应的异常去进行处理
         if (snapRetainCount < MIN_SNAP_RETAIN_COUNT) {
             LOG.warn("Invalid autopurge.snapRetainCount: " + snapRetainCount
                     + ". Defaulting to " + MIN_SNAP_RETAIN_COUNT);
@@ -338,7 +357,8 @@ public class QuorumPeerConfig {
             // Now add observers to servers, once the quorums have been
             // figured out
             servers.putAll(observers);
-    
+
+            // 但凡稍微用过一些zk的人，应该都懂，专门有一个文件，myid，里面写入这台机器的id
             File myIdFile = new File(dataDir, "myid");
             if (!myIdFile.exists()) {
                 throw new IllegalArgumentException(myIdFile.toString()

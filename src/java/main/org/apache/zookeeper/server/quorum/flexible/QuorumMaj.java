@@ -35,7 +35,9 @@ public class QuorumMaj implements QuorumVerifier {
      * @param n number of servers
      */
     public QuorumMaj(int n){
-        this.half = n/2;
+        this.half = n/2; // 3台机器，1.5，1
+        // 如果是4台机器，half = 2台机器，如果宕机了一个follower，剩下两个follower只要返回ack也是不行
+        //
     }
     
     /**

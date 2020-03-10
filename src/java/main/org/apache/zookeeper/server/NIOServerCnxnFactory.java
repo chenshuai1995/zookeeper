@@ -56,9 +56,9 @@ public class NIOServerCnxnFactory extends ServerCnxnFactory implements Runnable 
         }
     }
 
-    ServerSocketChannel ss;
+    ServerSocketChannel ss; // ServerSocketChannel，作为核心的server组件
 
-    final Selector selector = Selector.open();
+    final Selector selector = Selector.open(); // 走了一个多路复用组件
 
     /**
      * We use this buffer to do efficient socket I/O. Since there is a single
@@ -86,6 +86,7 @@ public class NIOServerCnxnFactory extends ServerCnxnFactory implements Runnable 
     public void configure(InetSocketAddress addr, int maxcc) throws IOException {
         configureSaslLogin();
 
+        // 创建了一个线程类，里面的业务逻辑
         thread = new Thread(this, "NIOServerCxn.Factory:" + addr);
         thread.setDaemon(true);
         maxClientCnxns = maxcc;
@@ -175,15 +176,22 @@ public class NIOServerCnxnFactory extends ServerCnxnFactory implements Runnable 
     public void run() {
         while (!ss.socket().isClosed()) {
             try {
-                selector.select(1000);
+                selector.select(1000); // 开始阻塞在Selecteor这儿
+                // 通过Selector去监听底层的网络连接
                 Set<SelectionKey> selected;
                 synchronized (this) {
                     selected = selector.selectedKeys();
                 }
                 ArrayList<SelectionKey> selectedList = new ArrayList<SelectionKey>(
                         selected);
-                Collections.shuffle(selectedList);
+                Collections.shuffle(selectedList); // 进行随机shuffle
+
+                // 他要保证不同的客户端的请求是随机顺序处理的，避免有一定的偏向性，避免
+                // 老是按照一定的顺序老处理客户端的请求
+
                 for (SelectionKey k : selectedList) {
+
+                    // 看有没有客户端的连接请求
                     if ((k.readyOps() & SelectionKey.OP_ACCEPT) != 0) {
                         SocketChannel sc = ((ServerSocketChannel) k
                                 .channel()).accept();
@@ -203,7 +211,9 @@ public class NIOServerCnxnFactory extends ServerCnxnFactory implements Runnable 
                             sk.attach(cnxn);
                             addCnxn(cnxn);
                         }
-                    } else if ((k.readyOps() & (SelectionKey.OP_READ | SelectionKey.OP_WRITE)) != 0) {
+                    }
+                    // 处理客户端发送的请求，或者是返回响应给客户端
+                    else if ((k.readyOps() & (SelectionKey.OP_READ | SelectionKey.OP_WRITE)) != 0) {
                         NIOServerCnxn c = (NIOServerCnxn) k.attachment();
                         c.doIO(k);
                     } else {

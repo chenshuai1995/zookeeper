@@ -69,7 +69,12 @@ public final class StaticHostProvider implements HostProvider {
             throw new IllegalArgumentException(
                     "A HostProvider may not be empty!");
         }
-        Collections.shuffle(this.serverAddresses);
+        Collections.shuffle(this.serverAddresses); // 他会对你配置的那个机器列表做一个shuffle
+        // 对每个客户端都是传递进去的连接串：host1:2181,host2:2181,host3:2181
+        // 但是其实每个客户端都是会随机打散的
+
+        // host2:2181,host3:2181,host1:2181
+        // host2:2181,host1:2181,host3:2181
     }
 
     public int size() {

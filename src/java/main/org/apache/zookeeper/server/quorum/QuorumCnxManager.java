@@ -176,7 +176,8 @@ public class QuorumCnxManager {
         DataOutputStream dout = null;
         try {
             // Sending id and challenge
-            dout = new DataOutputStream(sock.getOutputStream());
+            dout = new DataOutputStream(sock.getOutputStream()); // 甚至连NIO都没用
+            // 发送数据的过程，直接就是Java BIO的架构，进行节点之间的通信
             dout.writeLong(self.getId());
             dout.flush();
         } catch (IOException e) {
@@ -189,7 +190,7 @@ public class QuorumCnxManager {
         if (sid > self.getId()) {
             LOG.info("Have smaller server identifier, so dropping the " +
                      "connection: (" + sid + ", " + self.getId() + ")");
-            closeSocket(sock);
+            closeSocket(sock); // 你是不被允许跟比你的sid大的机器建立连接的
             // Otherwise proceed with the connection
         } else {
             SendWorker sw = new SendWorker(sock, sid);
@@ -349,9 +350,12 @@ public class QuorumCnxManager {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("Opening channel to server " + sid);
                 }
+                // ZooKeeper底层，是直接基于Java Socket进行TCP协议的通信的，NIO来做的
+                // 带着大家用Java NIO手撸一套分布式海量小文件存储系统，有多么的重要了
                 Socket sock = new Socket();
                 setSockOpts(sock);
-                sock.connect(self.getView().get(sid).electionAddr, cnxTO);
+                sock.connect(self.getView().get(sid).electionAddr, cnxTO); // 直接将socket
+                // 尝试连接到其他的机器的server socket上去，建立连接
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("Connected to server " + sid);
                 }
@@ -488,10 +492,11 @@ public class QuorumCnxManager {
                             .toString());
                     ss.bind(addr);
                     while (!shutdown) {
-                        Socket client = ss.accept();
+                        Socket client = ss.accept(); // 走BIO监听连接请求
                         setSockOpts(client);
                         LOG.info("Received connection request "
                                 + client.getRemoteSocketAddress());
+                        // 服务端接收到客户端的连接请求
                         receiveConnection(client);
                         numRetries = 0;
                     }

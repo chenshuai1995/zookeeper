@@ -68,10 +68,10 @@ public class ProposalRequestProcessor implements RequestProcessor {
          * call processRequest on the next processor.
          */
         
-        if(request instanceof LearnerSyncRequest){
+        if(request instanceof LearnerSyncRequest){ // 如果发现是要同步给learner，follower
             zks.getLeader().processSync((LearnerSyncRequest)request);
         } else {
-                nextProcessor.processRequest(request);
+            nextProcessor.processRequest(request); // 先走commitProcessor，放入一个队列里去
             if (request.hdr != null) {
                 // We need to sync and get consensus on any transactions
                 try {

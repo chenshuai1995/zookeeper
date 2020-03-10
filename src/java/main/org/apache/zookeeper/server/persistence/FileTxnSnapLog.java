@@ -127,7 +127,7 @@ public class FileTxnSnapLog {
      */
     public long restore(DataTree dt, Map<Long, Integer> sessions, 
             PlayBackListener listener) throws IOException {
-        snapLog.deserialize(dt, sessions);
+        snapLog.deserialize(dt, sessions); // 他把最近一个磁盘快照里的数据直接反序列化
         FileTxnLog txnLog = new FileTxnLog(dataDir);
         TxnIterator itr = txnLog.read(dt.lastProcessedZxid+1);
         long highestZxid = dt.lastProcessedZxid;

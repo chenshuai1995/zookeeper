@@ -204,7 +204,7 @@ public class FileTxnLog implements TxnLog {
                        Long.toHexString(hdr.getZxid())));
                fos = new FileOutputStream(logFileWrite);
                logStream=new BufferedOutputStream(fos);
-               oa = BinaryOutputArchive.getArchive(logStream);
+               oa = BinaryOutputArchive.getArchive(logStream); // jute搞了义序列化的输出流
                FileHeader fhdr = new FileHeader(TXNLOG_MAGIC,VERSION, dbId);
                fhdr.serialize(oa, "fileheader");
                // Make sure that the magic number is written before padding.
@@ -220,7 +220,7 @@ public class FileTxnLog implements TxnLog {
             }
             Checksum crc = makeChecksumAlgorithm();
             crc.update(buf, 0, buf.length);
-            oa.writeLong(crc.getValue(), "txnEntryCRC");
+            oa.writeLong(crc.getValue(), "txnEntryCRC"); // 专门用来校验这段数据是不能被改变的
             Util.writeTxnBytes(oa, buf);
             
             return true;
@@ -313,7 +313,7 @@ public class FileTxnLog implements TxnLog {
             if (forceSync) {
                 long startSyncNS = System.nanoTime();
 
-                log.getChannel().force(false);
+                log.getChannel().force(false); // 强制数据从os cache里进入到物理磁盘上去
 
                 long syncElapsedMS =
                     TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startSyncNS);

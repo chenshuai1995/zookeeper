@@ -132,7 +132,9 @@ public class Learner {
     void writePacket(QuorumPacket pp, boolean flush) throws IOException {
         synchronized (leaderOs) {
             if (pp != null) {
-                leaderOs.writeRecord(pp, "packet");
+                leaderOs.writeRecord(pp, "packet"); // 基于Leader的jute输出流
+                // 将QuorumPacket这个对象进行序列化之后
+                // 以字节流发送到leader那儿去了
             }
             if (flush) {
                 bufferedOutput.flush();
@@ -219,10 +221,10 @@ public class Learner {
     throws IOException, ConnectException, InterruptedException {
         sock = new Socket();        
         sock.setSoTimeout(self.tickTime * self.initLimit);
-        for (int tries = 0; tries < 5; tries++) {
+        for (int tries = 0; tries < 5; tries++) { // 大不了做一个重试
             try {
-                sock.connect(addr, self.tickTime * self.syncLimit);
-                sock.setTcpNoDelay(nodelay);
+                sock.connect(addr, self.tickTime * self.syncLimit); // 走TCP三次握手，完成连接的建立
+                sock.setTcpNoDelay(nodelay); // 如果连接建立之后，双方就有一个Socket进行通信
                 break;
             } catch (IOException e) {
                 if (tries == 4) {
@@ -238,9 +240,17 @@ public class Learner {
             Thread.sleep(1000);
         }
         leaderIs = BinaryInputArchive.getArchive(new BufferedInputStream(
-                sock.getInputStream()));
-        bufferedOutput = new BufferedOutputStream(sock.getOutputStream());
+                sock.getInputStream())); // 获取对leader的输入流，缓冲输入流，archive输入流
+        bufferedOutput = new BufferedOutputStream(sock.getOutputStream()); // 缓冲输出流，archive缓冲输出流
         leaderOs = BinaryOutputArchive.getArchive(bufferedOutput);
+
+//        leaderIs.startRecord("name");
+//        String name = leaderIs.readString("name");
+//        int age = leaderIs.readInt("age");
+//        float score = leaderIs.readFloat("score");
+//
+//        // 反序列化，把一堆字节数据读取出来，解析还原为我需要的各种类型的字段
+//        // 可以把这些字段还原为一个对象
     }   
     
     /**
@@ -256,16 +266,19 @@ public class Learner {
          */
     	long lastLoggedZxid = self.getLastLoggedZxid();
         QuorumPacket qp = new QuorumPacket();                
-        qp.setType(pktType);
-        qp.setZxid(ZxidUtils.makeZxid(self.getAcceptedEpoch(), 0));
+        qp.setType(pktType); // 我的类型
+        qp.setZxid(ZxidUtils.makeZxid(self.getAcceptedEpoch(), 0)); // 我最大的一个zxid
         
         /*
          * Add sid to payload
          */
         LearnerInfo li = new LearnerInfo(self.getId(), 0x10000);
-        ByteArrayOutputStream bsid = new ByteArrayOutputStream();
-        BinaryOutputArchive boa = BinaryOutputArchive.getArchive(bsid);
-        boa.writeRecord(li, "LearnerInfo");
+        ByteArrayOutputStream bsid = new ByteArrayOutputStream(); // 字节数组输出流
+        BinaryOutputArchive boa = BinaryOutputArchive.getArchive(bsid); // 用jute封装了一下输出流
+        boa.writeRecord(li, "LearnerInfo"); // 他先将LearnerInfo这个对象进行序列化了，写入了底层的
+        // ByteArrayOutputStream
+        // 就会把字节数组输出流里的LearnerInfo对象的序列化后的数据
+        // 转换为字节数组，设置到了QuorumPacket对象里去
         qp.setData(bsid.toByteArray());
         
         writePacket(qp, true);

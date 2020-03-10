@@ -81,7 +81,11 @@ public class DataTree {
      */
     private final ConcurrentHashMap<String, DataNode> nodes =
         new ConcurrentHashMap<String, DataNode>();
+    // 对于zk来说
+    // 核心的内存数据结构，并不是我们之前在dfs里面用的那个文件目录树那样的一个结构
+    // 用map，他所有的操作都是针对一个path
 
+    // 你所有的watcher之类的东西，都是在放在DataTree里的
     private final WatchManager dataWatches = new WatchManager();
 
     private final WatchManager childWatches = new WatchManager();
@@ -454,6 +458,8 @@ public class DataTree {
             long ephemeralOwner, int parentCVersion, long zxid, long time)
             throws KeeperException.NoNodeException,
             KeeperException.NodeExistsException {
+        // zk的数据结构的本质，就跟dfs系统是几乎是一样的
+
         int lastSlash = path.lastIndexOf('/');
         String parentName = path.substring(0, lastSlash);
         String childName = path.substring(lastSlash + 1);
@@ -519,9 +525,19 @@ public class DataTree {
             updateCount(lastPrefix, 1);
             updateBytes(lastPrefix, data == null ? 0 : data.length);
         }
+
+        // 下周，我们会完成watcher机制的讲解
+        // 如果你的内存里的znode树出现了变化，也就是说你执行了commit操作之后
+        // 必然要触发人家已经施加好的一些watcher监听器
+
+        // 如果说你对一个节点加了dataWatcher
         dataWatches.triggerWatch(path, Event.EventType.NodeCreated);
+
+        // 比如说我们队一个目录注册了childWatcher
+        // 此时他的子节点创建了，是如何进行监听器的触发的
         childWatches.triggerWatch(parentName.equals("") ? "/" : parentName,
                 Event.EventType.NodeChildrenChanged);
+
         return path;
     }
 
@@ -588,8 +604,12 @@ public class DataTree {
             ZooTrace.logTraceMessage(LOG, ZooTrace.EVENT_DELIVERY_TRACE_MASK,
                     "childWatches.triggerWatch " + parentName);
         }
+
+        // 如果你删除了一个节点的话
+        // 一个是会触发你对这个节点加的dataWatch
         Set<Watcher> processed = dataWatches.triggerWatch(path,
                 EventType.NodeDeleted);
+        // 另外一个是会触发你对这个节点的父节点会加childWatch
         childWatches.triggerWatch(path, EventType.NodeDeleted, processed);
         childWatches.triggerWatch(parentName.equals("") ? "/" : parentName,
                 EventType.NodeChildrenChanged);
@@ -617,6 +637,8 @@ public class DataTree {
           this.updateBytes(lastPrefix, (data == null ? 0 : data.length)
               - (lastdata == null ? 0 : lastdata.length));
         }
+
+        // 只要你一个znode的数据被修改了，就会触发你加的那个dataWatche监听器
         dataWatches.triggerWatch(path, EventType.NodeDataChanged);
         return s;
     }
@@ -650,7 +672,7 @@ public class DataTree {
         synchronized (n) {
             n.copyStat(stat);
             if (watcher != null) {
-                dataWatches.addWatch(path, watcher);
+                dataWatches.addWatch(path, watcher); // watcher = 客户端连接
             }
             return n.data;
         }

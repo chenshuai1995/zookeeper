@@ -16,7 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.jute;
+package org.apache.jute; // 序列化和反序列化的机制，走的是jute
+
+// 序列化和反序列化，走的都是自定义TCP协议，几个字节是什么，几个字节是什么，dfs系统
+// IM系统，自定义协议 + protobuf序列化
 
 import java.io.DataInput;
 import java.io.DataInputStream;

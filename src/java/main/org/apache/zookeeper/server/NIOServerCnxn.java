@@ -70,7 +70,9 @@ public class NIOServerCnxn extends ServerCnxn {
 
     ByteBuffer lenBuffer = ByteBuffer.allocate(4);
 
-    ByteBuffer incomingBuffer = lenBuffer;
+    ByteBuffer incomingBuffer = lenBuffer; // 对于一个连接，只有一个incomingBuffer
+    // 如果对这个连接的一个请求出现了拆包，没有读取完毕
+    // 那么此时就应该要下次OP_READ的时候继续读取，继续读取到这个incomingBuffer里去
 
     LinkedBlockingQueue<ByteBuffer> outgoingBuffers = new LinkedBlockingQueue<ByteBuffer>();
 
@@ -159,7 +161,8 @@ public class NIOServerCnxn extends ServerCnxn {
                 }
                 // if there is nothing left to send, we are done
                 if (bb.remaining() == 0) {
-                    packetSent();
+                    packetSent(); // 如果发送完毕了，就在这里就可以return掉了
+                    // 如果没有发送完毕呢？
                     return;
                 }
             }
@@ -170,9 +173,15 @@ public class NIOServerCnxn extends ServerCnxn {
                     LOG.trace("Add a buffer to outgoingBuffers, sk " + sk
                             + " is valid: " + sk.isValid());
                 }
+
+                // 如果说有很多个响应需要发送？
+                // CreateSession的响应需要发送，Ping的响应需要发送
+                // 刚开始的时候对一个客户端的连接，都是不关注OP_WRITE的，都是关注OP_READ
+                // [CreateSession的响应（拆包，发送了一部分，还剩一些）, Ping的响应，很多其他的响应]
+
                 outgoingBuffers.add(bb);
                 if (sk.isValid()) {
-                    sk.interestOps(sk.interestOps() | SelectionKey.OP_WRITE);
+                    sk.interestOps(sk.interestOps() | SelectionKey.OP_WRITE); // 让自己关注这个客户端的OP_WRITE的事件
                 }
             }
             
@@ -185,7 +194,7 @@ public class NIOServerCnxn extends ServerCnxn {
     private void readPayload() throws IOException, InterruptedException {
         if (incomingBuffer.remaining() != 0) { // have we read length bytes?
             int rc = sock.read(incomingBuffer); // sock is non-blocking, so ok
-            if (rc < 0) {
+            if (rc < 0) { // 他会尝试从socket中读取数据出来到incomingBuffer里去
                 throw new EndOfStreamException(
                         "Unable to read additional data from client sessionid 0x"
                         + Long.toHexString(sessionId)
@@ -194,10 +203,11 @@ public class NIOServerCnxn extends ServerCnxn {
         }
 
         if (incomingBuffer.remaining() == 0) { // have we read length bytes?
-            packetReceived();
-            incomingBuffer.flip();
+            packetReceived(); // 如果读取完毕了，那么就可以对请求进行处理
+            incomingBuffer.flip(); // 把他的开始读取的offset调整为0，最多读取的位置调整为之前读取到的那个offset
             if (!initialized) {
-                readConnectRequest();
+                readConnectRequest(); // 还米有完成session的初始化，此时一定读取的第一个请求是
+                // 一定是ConnectRequest请求
             } else {
                 readRequest();
             }
@@ -222,18 +232,18 @@ public class NIOServerCnxn extends ServerCnxn {
                             + Long.toHexString(sessionId)
                             + ", likely client has closed socket");
                 }
-                if (incomingBuffer.remaining() == 0) {
-                    boolean isPayload;
+                if (incomingBuffer.remaining() == 0) { // 如果读取到了4个字节
+                    boolean isPayload; // 如果你之前严格跟我写了分布式海量小文件存储系统，完全可以看懂的
                     if (incomingBuffer == lenBuffer) { // start of next request
-                        incomingBuffer.flip();
-                        isPayload = readLength(k);
+                        incomingBuffer.flip(); // 我先读取当前这个请求的长度
+                        isPayload = readLength(k); // 然后呢根据这长度，创建一个bytebuffer
                         incomingBuffer.clear();
                     } else {
                         // continuation
                         isPayload = true;
                     }
                     if (isPayload) { // not the case for 4letterword
-                        readPayload();
+                        readPayload(); // 正式从socket里读取对应的请求
                     }
                     else {
                         // four letter words take care

@@ -70,6 +70,11 @@ public class WatchManager {
             watch2Paths.put(watcher, paths);
         }
         paths.add(path);
+
+        // path -> watcher集合（有哪些客户端都监听了这个path的变化）
+        // watcher（客户端连接） -> path集合
+        // 如果说一旦客户端的session断开，zk服务端要进行一些清理，删除临时节点
+        // 删除这个客户端注册的一些监听器
     }
 
     public synchronized void removeWatcher(Watcher watcher) {
@@ -97,6 +102,9 @@ public class WatchManager {
                 KeeperState.SyncConnected, path);
         HashSet<Watcher> watchers;
         synchronized (this) {
+            // 你对一个路径加了一个监听器
+            // 此时zk的数据变化，在zk服务器端触发了这个监听器
+            // 直接会把在zk服务端注册的监听器给删除掉
             watchers = watchTable.remove(path);
             if (watchers == null || watchers.isEmpty()) {
                 if (LOG.isTraceEnabled()) {
@@ -106,8 +114,11 @@ public class WatchManager {
                 }
                 return null;
             }
+
+            // 你的监听器是一次性的
+
             for (Watcher w : watchers) {
-                HashSet<String> paths = watch2Paths.get(w);
+                HashSet<String> paths = watch2Paths.get(w); // 在zk服务端取消你这个客户端对这个路径的监听器
                 if (paths != null) {
                     paths.remove(path);
                 }

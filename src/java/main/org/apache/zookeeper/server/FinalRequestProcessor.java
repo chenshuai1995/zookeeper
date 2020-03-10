@@ -113,7 +113,8 @@ public class FinalRequestProcessor implements RequestProcessor {
                TxnHeader hdr = request.hdr;
                Record txn = request.txn;
 
-               rc = zks.processTxn(hdr, txn);
+               rc = zks.processTxn(hdr, txn); // 在这个步骤，实际上是把数据写入内存数据库里去
+                // 在leader上，此时起码是已经可以查询到这条数据了
             }
             // do not add non quorum packets to the queue.
             if (Request.isQuorum(request.type)) {
@@ -275,8 +276,10 @@ public class FinalRequestProcessor implements RequestProcessor {
             case OpCode.getData: {
                 lastOp = "GETD";
                 GetDataRequest getDataRequest = new GetDataRequest();
+                // 这里是在进行反序列化
                 ByteBufferInputStream.byteBuffer2Record(request.request,
                         getDataRequest);
+                // 就是基于ZKDatabase从内存里查询出来这个path对应的znode
                 DataNode n = zks.getZKDatabase().getNode(getDataRequest.getPath());
                 if (n == null) {
                     throw new KeeperException.NoNodeException();
@@ -291,6 +294,8 @@ public class FinalRequestProcessor implements RequestProcessor {
                 Stat stat = new Stat();
                 byte b[] = zks.getZKDatabase().getData(getDataRequest.getPath(), stat,
                         getDataRequest.getWatch() ? cnxn : null);
+                // zookeeper的源码整体质量不错
+                // 远远比用scala写出来的kafka的源码的质量要好
                 rsp = new GetDataResponse(b, stat);
                 break;
             }

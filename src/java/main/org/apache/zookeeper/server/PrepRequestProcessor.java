@@ -178,7 +178,7 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
 
     void addChangeRecord(ChangeRecord c) {
         synchronized (zks.outstandingChanges) {
-            zks.outstandingChanges.add(c);
+            zks.outstandingChanges.add(c); // 即将要进行处理的一个ChangeRecord
             zks.outstandingChangesForPath.put(c.path, c);
         }
     }
@@ -307,7 +307,8 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
                                     zks.getTime(), type);
 
         switch (type) {
-            case OpCode.create:                
+            case OpCode.create:
+                // 对于任何一个请求，会先检查一下当前的这个session是否已经过期了
                 zks.sessionTracker.checkSession(request.sessionId, request.getOwner());
                 CreateRequest createRequest = (CreateRequest)record;   
                 if(deserialize)
@@ -326,14 +327,20 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
                 String parentPath = path.substring(0, lastSlash);
                 ChangeRecord parentRecord = getRecordForPath(parentPath);
 
+                // 会检查一下你是否有权限针对这个路径进行操作
                 checkACL(zks, parentRecord.acl, ZooDefs.Perms.CREATE,
                         request.authInfo);
                 int parentCVersion = parentRecord.stat.getCversion();
                 CreateMode createMode =
                     CreateMode.fromFlag(createRequest.getFlags());
-                if (createMode.isSequential()) {
+                if (createMode.isSequential()) { // 是否是顺序节点
                     path = path + String.format(Locale.ENGLISH, "%010d", parentCVersion);
                 }
+
+                // 对于他而言，如果你创建的是顺序节点
+                // /kafka/brokers，顺序节点
+                // /kafka/brokers/brokers-00000000000001
+
                 try {
                     PathUtils.validatePath(path);
                 } catch(IllegalArgumentException ie) {
@@ -352,6 +359,10 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
                 if (ephemeralParent) {
                     throw new KeeperException.NoChildrenForEphemeralsException(path);
                 }
+
+                // 他会不停的去更新他的父record里的stat中的cversion
+                // 每次你去创建一个节点，都会更新付record里的stat中的version值，cversion
+                // 通过cversion就可以去保证顺序节点的创建
                 int newCversion = parentRecord.stat.getCversion()+1;
                 request.txn = new CreateTxn(path, createRequest.getData(),
                         listACL,
@@ -364,6 +375,7 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
                 parentRecord.childCount++;
                 parentRecord.stat.setCversion(newCversion);
                 addChangeRecord(parentRecord);
+                // 添加了一个ChangeRecord
                 addChangeRecord(new ChangeRecord(request.hdr.getZxid(), path, s,
                         0, listACL));
                 break;
@@ -454,6 +466,8 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
                 // queues up this operation without being the session owner.
                 // this request is the last of the session so it should be ok
                 //zks.sessionTracker.checkSession(request.sessionId, request.getOwner());
+
+                // 在这里，通过sessionId直接定位出来了这个session创建的所有的临时节点
                 HashSet<String> es = zks.getZKDatabase()
                         .getEphemerals(request.sessionId);
                 synchronized (zks.outstandingChanges) {
@@ -468,6 +482,10 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
                     for (String path2Delete : es) {
                         addChangeRecord(new ChangeRecord(request.hdr.getZxid(),
                                 path2Delete, null, 0, null));
+
+                        // 他必须得通知所有的follower，都去把这些临时节点都删除掉
+                        // commit，在内存数据库里删除掉所有的这个客户端对应的临时节点
+                        // 临时节点在内存目录树里被删除，他一定会触发相对应的watch监听器
                     }
 
                     zks.sessionTracker.setSessionClosing(request.sessionId);
@@ -513,6 +531,7 @@ public class PrepRequestProcessor extends Thread implements RequestProcessor {
             switch (request.type) {
                 case OpCode.create:
                 CreateRequest createRequest = new CreateRequest();
+                // zks.getNextZid()，全局性的生成唯一的zxid
                 pRequest2Txn(request.type, zks.getNextZxid(), request, createRequest, true);
                 break;
             case OpCode.delete:
